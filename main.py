@@ -4,9 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from matplotlib.ticker import MultipleLocator
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
-import argparse, csv, logging, sys, re, numpy as np, matplotlib.pyplot as plt, matplotlib as mpl
+import argparse, csv, json, logging, sys, re, numpy as np, matplotlib.pyplot as plt, matplotlib as mpl
 
 """
 Reduced DoS and Dirac energy analysis for ONETEP outputs.
@@ -35,11 +35,11 @@ Processing
 5) Produce stacked DoS plots (vac/solv), a 2x2 comparison panel, and
    ΔE_D = E_D(solv) - E_D(vac) summaries (series + heatmap).
 6) Write per-case metrics to 'UQ_results.csv' and ΔE_D to 'Dirac_deltas.csv'
-   in FIGDIR.
+   in cfg.figdir.
 
 Outputs
 -------
-PNG figures and CSV tables in FIGDIR (default: 'Figures/DoS/Reduced').
+PNG figures and CSV tables in cfg.figdir (default: 'Figures/DoS)).
 
 Notes
 -----
@@ -48,26 +48,6 @@ Notes
 - Normalisation/offset settings affect only vertical stacking for plotting,
   not any energy metrics.
 """
-
-# Parameters
-SYSTEMS: dict[str, Path] = {
-    "Au-000": Path("Au-000"),
-    "Au-001/Site-000/2.8": Path("Au-001/Site-000/2.8"),
-    "Au-001/Site-002/2.8": Path("Au-001/Site-002/2.8"),
-    "Au-001/Site-005/2.8": Path("Au-001/Site-005/2.8"),
-}
-
-BIASES: list[str] = ["-0.10V", "+0.00V", "+0.10V"] # bottom → top order
-
-SITE_LABELS: dict[str, str] = {
-    "Au-000": "No Adatom",
-    "Site-000": "H site",
-    "Site-002": "T site",
-    "Site-005": "B site",
-}
-
-VAC_LABEL: str  = r"Vacuum/Jellium"
-SOLV_LABEL: str = r"H$_2$O, 0.1 M HAuCl$_4$"
 
 # DoS evaluation
 BROADENING_EV: float = 0.10  #Gaussian broadening (σ) for DoS kernel in eV; choose to balance smoothness vs bias.
@@ -87,7 +67,6 @@ FIGSIZE_2x2: tuple[float, float] = (10.6, 6.4)
 FIGSIZE_DELTA_SERIES: tuple[float, float] = (10.6, 6.0)
 FIGSIZE_DELTA_HEAT: tuple[float, float]   = (8.2, 3.8)
 DPI_SAVE: int = 800
-FIGDIR: Path = Path("Figures/DoS/Reduced")
 
 HARTREE_TO_EV: float = 27.211386245988
 
@@ -128,9 +107,9 @@ mpl.rcParams.update({
     "lines.linewidth": 1.4,
     "axes.unicode_minus": True,
 })
+
 # Logging setup
 logger = logging.getLogger(__name__)
-
 
 # Data structures
 @dataclass
@@ -148,75 +127,307 @@ class ValBandsData:
     ef_eV: Optional[float]
     kpoints: list[KPoint]
 
+# Command line interface
+@dataclass
+class CLIConfig:
+    """
+    Wrap CLI parsing, system discovery, bias discovery, prefix resolution,
+    logging config, pretty system names, and output directory management.
 
-# Utilities
-def system_display_name(sys_label: str) -> str:
-    """Return Au-001(H), Au-001(T), Au-001(B) or Au-000."""
-    logger.debug("Resolving display name for system label: %s", sys_label)
+    Inputs (CLI)
+    ------------
+    - data_root: root folder that contains system folders (default: current directory)
+    - sys-include / sys-exclude: regex filters on system labels (relative to root)
+    - only-au: keep systems whose top folder starts with 'Au-'
+    - sites/heights: optional allow-lists for Site-* and height folders
+    - bias-regex: regex that matches bias directory names
+    - prefix-mode: how to get ONETEP prefix ('auto'|'rule'|'map')
+    - prefix-au000 / prefix-default: rule-mode fallbacks
+    - prefix-map-json: JSON with list of {"regex": "...", "prefix": "..."} items
+    - logging flags: -v/-q/--log-level/--log-file (same semantics as before)
+
+    Resolved at parse time
+    ----------------------
+    - systems_map: {system_label -> Path}
+    - biases: discovered (or default) list of biases, sorted by numeric value
+    - _prefix_map_patterns: compiled from JSON when prefix-mode='map'
+
+    Utilities (now methods)
+    -----------------------
+    - compute_log_level()           → int
+    - configure_logging()           → None
+    - ensure_outdir(path=None)      → Path (creates FIGDIR or `path`)
+    - system_display_name(label)    → str  (e.g. "Au-001(H)")
+    """
+    # User inputs
+    data_root: Path = Path(".")
+    sys_include: str = r".*"
+    sys_exclude: Optional[str] = None
+    only_au: bool = False
+    sites: Optional[list[str]] = None
+    heights: Optional[list[str]] = None
+    bias_regex: str = r"[+\-]\d+\.\d+V"
+
+    # Prefix resolution
+    prefix_mode: str = "auto"  # 'auto'|'rule'|'map'
+    prefix_au000: str = "graphene0"
+    prefix_default: str = "Au-Graphene0"
+    prefix_map_json: Optional[Path] = None
+
+    # Logging flags
+    log_level: Optional[str] = None
+    verbose: int = 0
+    quiet: int = 0
+    log_file: Optional[Path] = None
+
+    # Resolved fields
+    systems_map: dict[str, Path] | None = None
+    biases: list[str] | None = None
+    _prefix_map_patterns: list[tuple[re.Pattern, str]] | None = None
     
-    if sys_label.startswith("Au-000"): return "Au-000"
-    if "Site-000" in sys_label: return "Au-001(H)"
-    if "Site-002" in sys_label: return "Au-001(T)"
-    if "Site-005" in sys_label: return "Au-001(B)"
-    
-    for key, name in SITE_LABELS.items():
-        if key in sys_label:
-            base = sys_label.split('/')[0]
-            short = name.split()[0].strip().rstrip("site").strip().upper()
-            return f"{base}({short})"
+    # Plotting labels & output dir
+    vac_label: str = r"Vacuum/Jellium"
+    solv_label: str = r"H$_2$O, 0.1 M HAuCl$_4$"
+    figdir: Path = Path("Figures/DoS")
+
+    # Console CSV printing
+    show_csv: bool = False
+    max_csv_rows: int = 0
+
+    # Argument parsing
+    @staticmethod
+    def _build_argparser() -> argparse.ArgumentParser:
+        p = argparse.ArgumentParser(description="Reduced DoS & Dirac analysis for ONETEP outputs")
+
+        # Verbosity controls
+        p.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity (-v=INFO, -vv=DEBUG)")
+        p.add_argument("-q", "--quiet", action="count", default=0, help="Decrease verbosity (-q=WARNING, -qq=ERROR)")
+        p.add_argument("--log-level", choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"], help="Explicit log level (overrides -v/-q)")
+        p.add_argument("--log-file", type=Path, help="Write logs to this file in addition to stderr")
+
+        # Root discovery
+        p.add_argument("--data-root", dest="data_root", type=Path, default=None, help="Root folder containing system folders (preferred)")
+
+        # System filters
+        p.add_argument("--sys-include", default=r".*", help="Regex to keep system paths (relative to data_root)")
+        p.add_argument("--sys-exclude", default=None, help="Regex to drop system paths")
+        p.add_argument("--only-au", action="store_true", help="Keep systems whose top folder starts with 'Au-'")
+        p.add_argument("--sites", nargs="*", default=None, help="Allowed site names, e.g. Site-000 Site-005")
+        p.add_argument("--heights", nargs="*", default=None, help="Allowed adsorption heights, e.g. 2.8 3.0")
+
+        # Bias directory matching
+        p.add_argument("--bias-regex", default=r"[+\-]\d+\.\d+V", help="Regex that matches bias directory names")
+
+        # Prefix resolution
+        p.add_argument("--prefix-mode", choices=["auto", "rule", "map"], default="auto", help="How to determine the val_bands prefix per (system,bias)")
+        p.add_argument("--prefix-au000", default="graphene0", help="Fallback prefix for Au-000 if --prefix-mode=rule")
+        p.add_argument("--prefix-default", default="Au-Graphene0", help="Fallback prefix for other systems if --prefix-mode=rule")
+        p.add_argument("--prefix-map-json", type=Path, default=None, help="JSON file with objects {regex, prefix} used if --prefix-mode=map")
         
-    logger.debug("Display name resolution fell back to original label: %s", sys_label)
-    return sys_label
+        # Plotting labels & output dir
+        p.add_argument("--vac-label", default=r"Vacuum/Jellium", help="Legend/axis label for the vacuum environment")
+        p.add_argument("--solv-label", default=r"H$_2$O, 0.1 M HAuCl$_4$", help="Legend/axis label for the solvated environment")
+        p.add_argument("--figdir", type=Path, default=Path("Figures/DoS"), help="Directory to write figures and CSVs")
 
-def _ensure_outdir() -> None:
-    try: FIGDIR.mkdir(parents=True, exist_ok=True); logger.debug("Ensured output directory exists: %s", FIGDIR)
-    except OSError as e: logger.warning("Failed to create output directory %s: %s", FIGDIR, e); raise
+        # CSV outputs
+        p.add_argument("--show-csv", action="store_true", help="Print the CSV tables to console after writing")
+        p.add_argument("--max-csv-rows", type=int, default=0, help="Limit rows printed for each CSV (0 = no limit)")
 
-def _get_prefix(sys_label: str) -> str:
-    """ONETEP output prefix naming convention."""
-    
-    prefix = "graphene0" if sys_label.startswith("Au-000") else "Au-Graphene0"
-    logger.debug("Selected prefix '%s' for system '%s'", prefix, sys_label)
-    return prefix
+        return p
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser( description="Reduced DoS & Dirac analysis for ONETEP outputs")
-    
-    # Verbosity controls
-    p.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity (-v=INFO, -vv=DEBUG)")
-    p.add_argument("-q", "--quiet", action="count", default=0, help="Decrease verbosity (-q=WARNING, -qq=ERROR)")
-    p.add_argument("--log-level", choices=["CRITICAL","ERROR","WARNING","INFO","DEBUG","NOTSET"], help="Explicit log level (overrides -v/-q)")
-    p.add_argument("--log-file", type=Path, help="Write logs to this file in addition to stderr")
-    return p.parse_args()
+    @classmethod
+    def parse_from_argv(cls, argv: Optional[list[str]] = None) -> "CLIConfig":
+        p = cls._build_argparser()
+        ns = p.parse_args(argv)
+        cfg = cls(
+            data_root=ns.data_root,
+            sys_include=ns.sys_include,
+            sys_exclude=ns.sys_exclude,
+            only_au=ns.only_au,
+            sites=ns.sites,
+            heights=ns.heights,
+            bias_regex=ns.bias_regex,
+            prefix_mode=ns.prefix_mode,
+            prefix_au000=ns.prefix_au000,
+            prefix_default=ns.prefix_default,
+            prefix_map_json=ns.prefix_map_json,
+            log_level=ns.log_level,
+            verbose=ns.verbose,
+            quiet=ns.quiet,
+            log_file=ns.log_file,
+            vac_label=ns.vac_label,
+            solv_label=ns.solv_label,
+            figdir=ns.figdir,
+            show_csv=ns.show_csv,
+            max_csv_rows=ns.max_csv_rows,
+        )
+        
+        cfg._prepare_prefix_map()
+        cfg._discover_systems_and_biases()
+        return cfg
 
-def _compute_log_level(args: argparse.Namespace) -> int:
-    if args.log_level: return getattr(logging, args.log_level)
-    
-    # Base at WARNING; -v moves down (more verbose), -q moves up (quieter)
-    level = logging.WARNING - 10*args.verbose + 10*args.quiet
-    
-    # Clamp to [DEBUG, CRITICAL]
-    level = max(logging.DEBUG, min(logging.CRITICAL, level))
-    return level
+    # Logging & filesystem utilities
+    def compute_log_level(self) -> int:
+        """Compute log level from flags (or explicit --log-level)."""
+        if self.log_level: return getattr(logging, self.log_level)
+        level = logging.WARNING - 10 * self.verbose + 10 * self.quiet
+        level = max(logging.DEBUG, min(logging.CRITICAL, level))
+        return level
 
-def _configure_logging(level: int, log_file: Optional[Path]) -> None:
-    handlers = [logging.StreamHandler(sys.stderr)]
-    if log_file: handlers.append(logging.FileHandler(log_file))
-    logging.basicConfig(level=level, format="%(asctime)s | %(levelname)s | %(name)s: %(message)s", 
-                        datefmt="%H:%M:%S", handlers=handlers, force=True,)
-    
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    
-    # Clean summary logger
-    summary = logging.getLogger("ReducedDoS.summary")
-    summary.setLevel(logging.INFO)
-    summary.propagate = False            # don't duplicate via root
-    summary.handlers = []                # avoid duplicates if reconfigured
+    def configure_logging(self) -> None:
+        """Configure logging (root + clean summary logger)."""
+        level = self.compute_log_level()
+        handlers = [logging.StreamHandler(sys.stderr)]
+        if self.log_file: handlers.append(logging.FileHandler(self.log_file))
+        logging.basicConfig(level=level, format="%(asctime)s | %(levelname)s | %(name)s: %(message)s", datefmt="%H:%M:%S", handlers=handlers, force=True,)
+        logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
-    h = logging.StreamHandler(sys.stdout)  # print clean report to stdout
-    h.setLevel(logging.INFO)
-    h.setFormatter(logging.Formatter("%(message)s"))  # just the message
-    summary.addHandler(h)
+        # Clean summary on stdout
+        summary = logging.getLogger("ReducedDoS.summary")
+        summary.setLevel(logging.INFO)
+        summary.propagate = False
+        summary.handlers = []
+
+        h = logging.StreamHandler(sys.stdout)
+        h.setLevel(logging.INFO)
+        h.setFormatter(logging.Formatter("%(message)s"))
+        summary.addHandler(h)
+
+    def ensure_outdir(self, path: Optional[Path] = None) -> Path:
+        """
+        Ensure the output directory exists.
+        If `path` is None, uses cfg.figdir..
+        """
+        out = path or self.figdir
+        try: out.mkdir(parents=True, exist_ok=True); logging.getLogger(__name__).debug("Ensured output directory exists: %s", out)
+        except OSError as e: logging.getLogger(__name__).warning("Failed to create output directory %s: %s", out, e); raise
+        return out
+
+    # Display name helper
+    @staticmethod
+    def system_display_name(sys_label: str) -> str:
+        """
+        Canonical pretty name from a label like:
+            "Au-001/Site-005/2.8"  →  "Au-001(B)"
+            "Au-001/Site-002"      →  "Au-001(T)"
+            "Au-001/Site-000"      →  "Au-001(H)"
+            "Au-000"               →  "Au-000"
+        Rules
+        -----
+        - Base/system root = first path segment (e.g. "Au-000", "Au-001", ...).
+        - If base ends with '-000' (e.g. "Au-000", "Si-000"), return base (no suffix).
+        - Otherwise, if a 'Site-xxx' segment exists (case-insensitive):
+              000 → H, 002 → T, 005 → B
+          return "{base}({letter})". Unknown site codes → base only.
+        - Heights like '2.8' are ignored.
+        """
+        
+        log = logging.getLogger(__name__)
+        log.debug("Resolving display name for system label: %s", sys_label)
+
+        parts = sys_label.split("/")
+        if not parts:return sys_label
+
+        base = parts[0]
+        if base.endswith("-000"): return base
+
+        # Find a 'Site-xxx' segment (case-insensitive), ignore heights
+        m = next((re.match(r"(?i)^site-(\d{3})$", p) for p in parts[1:] if re.match(r"(?i)^site-\d{3}$", p)),None,)
+        if not m: return base
+
+        code = m.group(1)
+        letter = {"000": "H", "002": "T", "005": "B"}.get(code)
+        if not letter:log.debug("Unknown site code '%s' in '%s'; using base only.", code, sys_label); return base
+        return f"{base}({letter})"
+
+    # Prefix helpers 
+    def _prepare_prefix_map(self) -> None:
+        self._prefix_map_patterns = []
+        if self.prefix_mode != "map" or not self.prefix_map_json: return
+        try:
+            obj = json.loads(self.prefix_map_json.read_text())
+            if isinstance(obj, dict) and "rules" in obj: obj = obj["rules"]
+            if isinstance(obj, list):
+                for item in obj:
+                    rx = re.compile(item["regex"])
+                    self._prefix_map_patterns.append((rx, str(item["prefix"])))
+                    
+        except Exception as e: logging.getLogger(__name__).warning("Failed to load prefix-map JSON %s: %s", self.prefix_map_json, e)
+
+    def resolve_prefix_for(self, sys_label: str) -> str:
+        base = sys_label.split('/')[0]  # "Au-000", "Au-001", ...
+        if self.prefix_mode == "map" and self._prefix_map_patterns:
+            for rx, pref in self._prefix_map_patterns:
+                if rx.search(sys_label):
+                    return pref
+        if self.prefix_mode == "rule":
+            return self.prefix_au000 if base == "Au-000" else self.prefix_default
+        # default 'auto' heuristic
+        return "graphene0" if base == "Au-000" else "Au-Graphene0"
+
+    # Discovery of systems & biases
+    def _discover_systems_and_biases(self) -> None:
+        """
+        Populate self.systems_map and self.biases by scanning data_root with the filters.
+        Accepts both layouts:
+            Au-000/<BIAS>/
+            Au-001/Site-XXX[/HEIGHT]/<BIAS>/
+        """
+        root = self.data_root
+        keep_rx = re.compile(self.sys_include)
+        drop_rx = re.compile(self.sys_exclude) if self.sys_exclude else None
+        bias_rx = re.compile(self.bias_regex)
+
+        systems: dict[str, Path] = {}
+
+        # Pattern A: top-level Au-000 (no sites/heights)
+        for p in sorted(root.glob("Au-000")):
+            if not p.is_dir(): continue
+            if self.only_au and not p.name.startswith("Au-"): continue
+            label = "Au-000"
+            if not keep_rx.search(label): continue
+            if drop_rx and drop_rx.search(label): continue
+            systems[label] = p
+
+        # Pattern B: Au-001/Site-XXX[/HEIGHT]
+        for base in sorted(root.glob("Au-*")):
+            if not base.is_dir(): continue
+            if self.only_au and not base.name.startswith("Au-"): continue
+            if base.name == "Au-000": continue
+            for site_dir in sorted(base.glob("Site-*")):
+                if not site_dir.is_dir(): continue
+                site_name = site_dir.name
+                if self.sites and site_name not in self.sites: continue
+                # optional height level
+                height_dirs = [d for d in site_dir.iterdir() if d.is_dir() and re.fullmatch(r"\d+(\.\d+)?", d.name)]
+                if height_dirs:
+                    for h in sorted(height_dirs, key=lambda x: float(x.name)):
+                        if self.heights and h.name not in self.heights: continue
+                        label = f"{base.name}/{site_name}/{h.name}"
+                        if not keep_rx.search(label): continue
+                        if drop_rx and drop_rx.search(label): continue
+                        systems[label] = h
+                else:
+                    label = f"{base.name}/{site_name}"
+                    if not keep_rx.search(label): continue
+                    if drop_rx and drop_rx.search(label): continue
+                    systems[label] = site_dir
+
+        # Bias discovery = union over all systems
+        bias_set: set[str] = set()
+        for _, sys_path in systems.items():
+            try:sub = [d.name for d in sys_path.iterdir() if d.is_dir() and bias_rx.fullmatch(d.name)]
+            except Exception: sub = []
+            bias_set.update(sub)
+
+        # Sort biases by numeric value (e.g., "-0.10V" < "+0.00V" < "+0.10V")
+        def _bias_key(b: str) -> float:
+            try: return float(b.replace("V", ""))
+            except Exception: return 0.0
+
+        self.biases = sorted(bias_set, key=_bias_key) if bias_set else ["-0.10V", "+0.00V", "+0.10V"]
+        self.systems_map = systems
+
 
 # Parsing
 class ValBandsParser:
@@ -368,7 +579,7 @@ class ValBandsParser:
         logger.debug("Searching EF fallback in %s", folder)
         
         candidates: list[Path] = []
-        for pat in ("*.onetep", "*.out", "*.log", "*.txt"): candidates.extend(folder.glob(pat))
+        for pat in ("*.onetep", "*.out"): candidates.extend(folder.glob(pat))
         
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         logger.debug("Scanning %d candidate log files for EF", len(candidates))
@@ -606,6 +817,11 @@ class DoSPlotter:
         ax.xaxis.set_major_locator(MultipleLocator(X_MAJOR_EVERY_EV))
         ax.xaxis.set_minor_locator(MultipleLocator(X_MINOR_EVERY_EV))
         ax.set_xlim(ENERGY_RANGE)
+        
+    @staticmethod
+    def _bias_positions(biases: list[str]) -> tuple[np.ndarray, list[str]]:
+        xs = np.arange(len(biases))
+        return xs, biases
 
     @staticmethod
     def _panel_offsets(doses: list[np.ndarray], grid: np.ndarray, sys_label: str) -> tuple[dict[str, float], tuple[float, float]]:
@@ -680,21 +896,29 @@ class DoSPlotter:
         return outs
 
     @staticmethod
-    def plot_vertical_stack(env_key: str, env_label: str,
-                            parsed_by_sys: dict[str, dict[str, dict[str, ValBandsData]]]) -> Path:
+    def plot_vertical_stack(
+        env_key: str,
+        env_label: str,
+        parsed_by_sys: dict[str, dict[str, dict[str, ValBandsData]]],
+        systems: dict[str, Path],
+        biases: list[str],
+        name_fn: Callable[[str], str],
+        ensure_outdir: Callable[[], Path],
+    ) -> Path:
         """1x4 layout; each subplot shows three biases with EF vertical lines."""
         logger.debug("Plot vertical stack: env=%s", env_key)
-        
+
         fig, axes = plt.subplots(1, 4, figsize=FIGSIZE_1x4, sharex=True, sharey=True, constrained_layout=False)
         grid = np.linspace(ENERGY_RANGE[0], ENERGY_RANGE[1], N_GRID)
 
         legend_handles: list[plt.Line2D] = []
         legend_labels: list[str] = []
 
-        for i, (sys_label, _) in enumerate(SYSTEMS.items()):
+        sys_labels = sorted(systems.keys(), key=name_fn)[:4]
+        for i, sys_label in enumerate(sys_labels):
             logger.debug("Stack subplot for system: %s", sys_label)
             ax = axes[i]
-            ax.set_title(system_display_name(sys_label))
+            ax.set_title(name_fn(sys_label))
             ax.set_xlabel("Energy (eV)")
             ax.set_ylabel("Density of States (arb.)")
 
@@ -703,78 +927,82 @@ class DoSPlotter:
 
             DoSPlotter._panel_common_format(ax)
 
-            # Build raw doses for all biases first
             raw_doses: list[np.ndarray] = []
             ok_biases: list[str] = []
             ef_map: dict[str, Optional[float]] = {}
 
-            for bias in BIASES:
+            for bias in biases:
                 ds = parsed_by_sys.get(sys_label, {}).get(bias, {}).get(env_key)
                 if not ds or not ds.kpoints: logger.warning("Missing dataset: system=%s bias=%s env=%s", sys_label, bias, env_key); continue
-                
+
                 E, W = DoSBuilder.flatten_states(ds, align_zero=False, spin=None)
                 DOS = DoSBuilder.gaussian_dos(E, W, grid, BROADENING_EV)
                 raw_doses.append(DOS)
                 ok_biases.append(bias)
                 ef_map[bias] = ds.ef_eV
-            
+
             logger.debug("Plotted %d biases for %s (%s)", len(ok_biases), sys_label, env_key)
             doses = DoSPlotter._normalise_panel(raw_doses, grid, NORMALISATION)
             bias_offsets, (y_min, y_max) = DoSPlotter._panel_offsets(doses, grid, sys_label)
 
             for DOS, bias in zip(doses, ok_biases):
-                (line,) = ax.plot(grid, DOS + bias_offsets[bias],
-                                  color=BIAS_COLOUR.get(bias, COLOURS["black"]),
-                                  label=bias)
-                # Vertical line AT the *actual* EF for this bias (if present)
+                (line,) = ax.plot(grid, DOS + bias_offsets[bias], color=BIAS_COLOUR.get(bias, COLOURS["black"]), label=bias,)
                 ef_here = ef_map.get(bias)
-                if ef_here is not None and np.isfinite(ef_here):
-                    ax.axvline(float(ef_here), color=BIAS_COLOUR.get(bias, COLOURS["black"]),
-                               lw=1.0, ls="--", alpha=0.8)
+                if ef_here is not None and np.isfinite(ef_here): ax.axvline(float(ef_here), color=BIAS_COLOUR.get(bias, COLOURS["black"]), lw=1.0, ls="--", alpha=0.8,)
+                if i == 0:legend_handles.append(line); legend_labels.append(bias)
 
-                if i == 0: legend_handles.append(line); legend_labels.append(bias)
-
-            # Missing bias -> annotate
-            for bias in BIASES:
-                if bias not in ok_biases: ax.text(0.5, 0.5 - 0.15 * BIASES.index(bias), f"No data {bias}",
-                                                  transform=ax.transAxes, ha="center", va="center",
-                                                  fontsize=9, color="red")
-
+            for bias in biases:
+                if bias not in ok_biases: ax.text(0.5, 0.5 - 0.15 * biases.index(bias), f"No data {bias}", transform=ax.transAxes, 
+                                                  ha="center", va="center", fontsize=9, color="red",
+                                                )
             ax.set_ylim(y_min, y_max)
 
-        fig.legend(legend_handles, legend_labels, ncol=3,
-                   frameon=True, facecolor="white", edgecolor="0.3",
-                   loc="upper center", bbox_to_anchor=(0.5, 1.02), borderaxespad=0.4)
+        fig.legend(legend_handles, legend_labels, ncol=3, frameon=True, facecolor="white", edgecolor="0.3", 
+                   loc="upper center", bbox_to_anchor=(0.5, 1.02), borderaxespad=0.4,
+                   )
 
         fig.subplots_adjust(top=0.86, left=0.07, right=0.98, bottom=0.18, wspace=0.15)
-        _ensure_outdir()
-        out = FIGDIR / f"Stacked_DoS_{env_key}.png"
+        outdir = ensure_outdir()
+        out = outdir / f"Stacked_DoS_{env_key}.png"
         fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved vertical stack plot: %s", out)
         return out
 
     @staticmethod
-    def plot_2x2_comparison(parsed_by_sys: dict[str, dict[str, dict[str, ValBandsData]]]) -> Path:
+    def plot_2x2_comparison(
+        parsed_by_sys: dict[str, dict[str, dict[str, ValBandsData]]],
+        biases: list[str],
+        name_fn: Callable[[str], str],
+        ensure_outdir: Callable[[], Path],
+        vac_label: str,
+        solv_label: str,
+    ) -> Path:
         """
         2x2 grid:
-            Col 1 = Vacuum/Jellium, Col 2 = Solvated
-            Row 1 = Au-000,         Row 2 = Au-001(B)
+            Columns = (vac_label, solv_label)
+            Rows    = (two representative systems, e.g. Au-000 and Au-001(B))
         """
         logger.debug("Plot 2x2 comparison")
-        row_systems: list[str] = ["Au-000", "Au-001/Site-005/2.8"]
-        col_envs: list[tuple[str, str]] = [("vac", VAC_LABEL), ("solv", SOLV_LABEL)]
+        available:list = list(parsed_by_sys.keys())
+        prefer = ["Au-000", "Au-001/Site-005/2.8"]
+        row_systems = [s for s in prefer if s in available]
+        for s in available:
+            if len(row_systems) >= 2: break
+            if s not in row_systems: row_systems.append(s)
+            
+        row_systems = row_systems[:2]
+        
+        col_envs: list[tuple[str, str]] = [("vac", vac_label), ("solv", solv_label)]
 
         fig, axes = plt.subplots(2, 2, figsize=FIGSIZE_2x2, sharex=True, sharey=True, constrained_layout=False)
         grid = np.linspace(ENERGY_RANGE[0], ENERGY_RANGE[1], N_GRID)
 
-        # Column titles
         for j, (_, env_label) in enumerate(col_envs): axes[0, j].set_title(env_label)
 
-        # Row titles
-        for i, sys_key in enumerate(row_systems): axes[i, 0].text(-0.20, 0.5, system_display_name(sys_key),
-                                                                  transform=axes[i, 0].transAxes,
-                                                                  ha="right", va="center", rotation=90, fontsize=11)
+        for i, sys_key in enumerate(row_systems): axes[i, 0].text(-0.20, 0.5, name_fn(sys_key), transform=axes[i, 0].transAxes,
+                                                                  ha="right", va="center", rotation=90, fontsize=11,
+                                                                 )
 
         legend_handles: list[plt.Line2D] = []
         legend_labels: list[str] = []
@@ -784,8 +1012,7 @@ class DoSPlotter:
                 logger.debug("2x2 subplot: system=%s env=%s", sys_key, env_key)
                 ax = axes[i, j]
                 letters = [["(a)", "(b)"], ["(c)", "(d)"]]
-                ax.text(0.02, 0.95, letters[i][j], transform=ax.transAxes, ha="left", va="top",
-                        fontsize=11, fontweight="bold")
+                ax.text(0.02, 0.95, letters[i][j], transform=ax.transAxes, ha="left", va="top", fontsize=11, fontweight="bold")
 
                 DoSPlotter._panel_common_format(ax)
 
@@ -793,10 +1020,10 @@ class DoSPlotter:
                 ok_biases: list[str] = []
                 ef_map: dict[str, Optional[float]] = {}
 
-                for bias in BIASES:
+                for bias in biases:
                     ds = parsed_by_sys.get(sys_key, {}).get(bias, {}).get(env_key)
                     if not ds or not ds.kpoints: logger.warning("Missing dataset: system=%s bias=%s env=%s", sys_key, bias, env_key); continue
-                    
+
                     E, W = DoSBuilder.flatten_states(ds, align_zero=False, spin=None)
                     DoS = DoSBuilder.gaussian_dos(E, W, grid, BROADENING_EV)
                     raw_doses.append(DoS)
@@ -807,132 +1034,135 @@ class DoSPlotter:
                 bias_offsets, (y_min, y_max) = DoSPlotter._panel_offsets(doses, grid, sys_key)
 
                 for DoS, bias in zip(doses, ok_biases):
-                    (line,) = ax.plot(grid, DoS + bias_offsets[bias],
-                                      color=BIAS_COLOUR.get(bias, COLOURS["black"]),
-                                      label=bias)
+                    (line,) = ax.plot(grid, DoS + bias_offsets[bias], color=BIAS_COLOUR.get(bias, COLOURS["black"]), label=bias,)
                     ef_here = ef_map.get(bias)
-                    if ef_here is not None and np.isfinite(ef_here):
-                        ax.axvline(float(ef_here), color=BIAS_COLOUR.get(bias, COLOURS["black"]),
-                                   lw=1.0, ls="--", alpha=0.8)
-                        
+                    if ef_here is not None and np.isfinite(ef_here): ax.axvline(float(ef_here), color=BIAS_COLOUR.get(bias, COLOURS["black"]),
+                                                                                lw=1.0, ls="--", alpha=0.8
+                                                                                )
+
                     if (i, j) == (0, 0): legend_handles.append(line); legend_labels.append(bias)
 
-                for bias in BIASES:
-                    if bias not in ok_biases:
-                        ax.text(0.5, 0.5 - 0.15 * BIASES.index(bias), f"No data {bias}",
-                                transform=ax.transAxes, ha="center", va="center",
-                                fontsize=9, color="red")
-
+                for bias in biases:
+                    if bias not in ok_biases: ax.text(0.5, 0.5 - 0.15 * biases.index(bias), f"No data {bias}", transform=ax.transAxes,
+                                                      ha="center", va="center", fontsize=9, color="red",
+                                                      )
                 ax.set_ylim(y_min, y_max)
                 if i == 1: ax.set_xlabel("Energy (eV)")
                 if j == 0: ax.set_ylabel("Density of States (arb.)")
 
-        fig.legend(legend_handles, legend_labels, ncol=3,
-                   frameon=True, facecolor="white", edgecolor="0.3",
-                   loc="upper center", bbox_to_anchor=(0.5, 1.02), borderaxespad=0.4)
+        fig.legend(legend_handles, legend_labels, ncol=3, frameon=True, facecolor="white",  edgecolor="0.3", 
+                   loc="upper center", bbox_to_anchor=(0.5, 1.02), borderaxespad=0.4,
+                   )
 
         fig.subplots_adjust(top=0.90, left=0.05, right=0.98, bottom=0.12, wspace=0.15, hspace=0.15)
-        _ensure_outdir()
-        out = FIGDIR / "Stacked_DoS_2x2_Vac_vs_Solv_Au000_vs_Au001B.png"
+        outdir = ensure_outdir()
+        out = outdir / "Stacked_DoS_2x2_Vac_vs_Solv_Au000_vs_Au001B.png"
         fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved 2x2 comparison plot: %s", out)
         return out
 
     @staticmethod
-    def _bias_positions() -> tuple[np.ndarray, list[str]]:
-        xs = np.arange(len(BIASES))
-        return xs, BIASES
-
-    @staticmethod
-    def plot_delta_dirac_series(delta_records: list[dict[str, float]]) -> Path:
-        """
-        2x2 grid of error-bar plots (systems; x=bias; y=ΔE_D, yerr=2σ).
-        """
+    def plot_delta_dirac_series(
+        delta_records: list[dict[str, float]],
+        biases: list[str],
+        name_fn: Callable[[str], str],
+        ensure_outdir: Callable[[], Path],
+    ) -> Path:
         logger.debug("Plot ΔE_D series: nrecords=%d", len(delta_records))
         
-        sys_order = ["Au-000", "Au-001/Site-000/2.8", "Au-001/Site-002/2.8", "Au-001/Site-005/2.8"]
+        sys_labels = sorted({r["system"] for r in delta_records}, key=name_fn)
+        sys_labels.sort(key=lambda s: (0 if s.startswith("Au-000") else 1, name_fn(s)))
+        if not sys_labels:
+            logger.warning("No ΔE_D records; skipping series plot")
+            out = ensure_outdir() / "Delta_E_D_vs_Bias_series.png"
+            plt.figure(); plt.savefig(out); plt.close(); return out
+
+        sys_order = sys_labels[:4]
         fig, axes = plt.subplots(2, 2, figsize=FIGSIZE_DELTA_SERIES, constrained_layout=False, sharey=True)
-        xs, xticklabels = DoSPlotter._bias_positions()
+        xs, xticklabels = DoSPlotter._bias_positions(biases)
         table = {(r["system"], r["bias"]): r for r in delta_records}
 
         for idx, sys_key in enumerate(sys_order):
             ax = axes[idx // 2, idx % 2]
             letters = [["(a)", "(b)"], ["(c)", "(d)"]]
-            ax.text(0.02, 0.95, letters[idx // 2][idx % 2], transform=ax.transAxes,
-                    ha="left", va="top", fontsize=11, fontweight="bold")
+            ax.text(0.02, 0.95, letters[idx // 2][idx % 2], transform=ax.transAxes, ha="left", va="top", fontsize=11, fontweight="bold")
 
-            ys: list[float] = []; yerr: list[float] = []
-            
-            for b in BIASES:
+            ys: list[float] = []
+            yerr: list[float] = []
+            for b in biases:
                 rec = table.get((sys_key, b))
-                if rec is None: ys.append(np.nan); yerr.append(0.0); continue
-                
-                ys.append(float(rec["Delta_E_D_eV"]))
-                yerr.append(float(rec["Delta_unc_2sigma_eV"]))
+                if rec is None: ys.append(np.nan); yerr.append(0.0)
+                else: ys.append(float(rec["Delta_E_D_eV"])); yerr.append(float(rec["Delta_unc_2sigma_eV"]))
 
-            for x, y, e, b in zip(xs, ys, yerr, BIASES):
-                ax.errorbar(x, y, yerr=e, fmt="o-", lw=1.4, ms=4,
-                            color=BIAS_COLOUR.get(b, COLOURS["black"]), capsize=3)
+            for x, y, e, b in zip(xs, ys, yerr, biases):
+                ax.errorbar(x, y, yerr=e, fmt="o-", lw=1.4, ms=4, color=BIAS_COLOUR.get(b, COLOURS["black"]), capsize=3)
 
             ax.axhline(0.0, color="0.4", lw=1.0, ls="--")
             ax.set_xticks(xs, xticklabels)
             ax.tick_params(which="both", direction="in", top=True)
-            ax.set_title(system_display_name(sys_key))
+            ax.set_title(name_fn(sys_key))
             if idx // 2 == 1: ax.set_xlabel("Applied bias (V)")
-            if idx % 2 == 0:  ax.set_ylabel(r"$\Delta E_D$ (eV)")
+            if idx % 2 == 0: ax.set_ylabel(r"$\Delta E_D$ (eV)")
 
         fig.subplots_adjust(top=0.92, left=0.08, right=0.98, bottom=0.12, wspace=0.20, hspace=0.25)
-        _ensure_outdir()
-        out = FIGDIR / "Delta_E_D_vs_Bias_series.png"
+        outdir = ensure_outdir()
+        out = outdir / "Delta_E_D_vs_Bias_series.png"
         fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
         plt.close(fig)
-        
+
         logger.info("Saved ΔE_D series plot: %s", out)
         return out
 
     @staticmethod
-    def plot_delta_dirac_heatmap(delta_records: list[dict[str, float]]) -> Path:
-        """Heatmap (systems, biases) of ΔE_D with text annotations (+ 2σ)."""
-        
+    def plot_delta_dirac_heatmap(
+        delta_records: list[dict[str, float]],
+        biases: list[str],
+        name_fn: Callable[[str], str],
+        ensure_outdir: Callable[[], Path],
+    ) -> Path:
         logger.debug("Plot ΔE_D heatmap: nrecords=%d", len(delta_records))
-        sys_order = ["Au-000", "Au-001/Site-000/2.8", "Au-001/Site-002/2.8", "Au-001/Site-005/2.8"]
-        n_sys, n_bias = len(sys_order), len(BIASES)
+        sys_labels = sorted({r["system"] for r in delta_records}, key=name_fn)
+        sys_order = sorted(sys_labels, key=lambda s: (0 if s.startswith("Au-000") else 1, name_fn(s)))
+        
+        if not sys_order:
+            logger.warning("No ΔE_D records; skipping heatmap")
+            out = ensure_outdir() / "Delta_E_D_heatmap.png"
+            plt.figure(); plt.savefig(out); plt.close(); return out
+            
+        n_sys, n_bias = len(sys_order), len(biases)
         Z = np.full((n_sys, n_bias), np.nan, float)
         U = np.full((n_sys, n_bias), np.nan, float)
 
         index = {(r["system"], r["bias"]): r for r in delta_records}
         for i, s in enumerate(sys_order):
-            for j, b in enumerate(BIASES):
+            for j, b in enumerate(biases):
                 rec = index.get((s, b))
-                if rec:
-                    Z[i, j] = float(rec["Delta_E_D_eV"])
-                    U[i, j] = float(rec["Delta_unc_2sigma_eV"])
+                if rec: Z[i, j] = float(rec["Delta_E_D_eV"]); U[i, j] = float(rec["Delta_unc_2sigma_eV"])
 
         fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_DELTA_HEAT, constrained_layout=False)
         vmax = np.nanmax(np.abs(Z))
-        
         if not np.isfinite(vmax) or vmax == 0: logger.warning("Heatmap ΔE_D has zero/NaN range; using fallback vmax=0.1"); vmax = 0.1
-        
+
         im = ax.imshow(Z, aspect="auto", cmap="coolwarm", vmin=-vmax, vmax=+vmax)
         for i in range(n_sys):
             for j in range(n_bias):
                 if np.isfinite(Z[i, j]):
-                    ax.text(j, i-0.10, f"{Z[i,j]:+.2f}", ha="center", va="center", fontsize=10, color="k")
-                    ax.text(j, i+0.25, r"$\pm$" + f"{U[i,j]:.2f}", ha="center", va="center", fontsize=9, color="k")
+                    ax.text(j, i - 0.10, f"{Z[i,j]:+.2f}", ha="center", va="center", fontsize=10, color="k")
+                    ax.text(j, i + 0.25, r"$\pm$" + f"{U[i,j]:.2f}", ha="center", va="center", fontsize=9, color="k")
 
-        ax.set_xticks(np.arange(n_bias), BIASES)
-        ax.set_yticks(np.arange(n_sys), [system_display_name(s) for s in sys_order])
+        ax.set_xticks(np.arange(n_bias), biases)
+        ax.set_yticks(np.arange(n_sys), [name_fn(s) for s in sys_order])
         ax.tick_params(which="both", direction="in", top=False, right=False)
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label(r"$\Delta E_D$ (eV)")
 
         fig.subplots_adjust(top=0.95, left=0.20, right=0.98, bottom=0.12)
-        _ensure_outdir()
-        out = FIGDIR / "Delta_E_D_heatmap.png"
+        outdir = ensure_outdir()
+        out = outdir / "Delta_E_D_heatmap.png"
         fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
         plt.close(fig)
-        
+
         logger.info("Saved ΔE_D heatmap: %s", out)
         return out
 
@@ -941,7 +1171,8 @@ class DoSPlotter:
 class ReducedDoSPipeline:
     """End-to-end pipeline: parse → build DoS → Dirac/UQ → plots + CSV."""
 
-    def __init__(self) -> None:
+    def __init__(self, cfg: CLIConfig) -> None:
+        self.cfg = cfg
         self.parser = ValBandsParser()
     
     @staticmethod
@@ -956,6 +1187,25 @@ class ReducedDoSPipeline:
             if x is None: return ""
             if isinstance(x, float) and not np.isfinite(x): return ""
             return f"{float(x):.4f}"
+            
+    def _print_csv_table(self, title: str, header: list[str], rows: list[list[str]], max_rows: int) -> None:
+        """Pretty-print a small CSV-like table to the summary logger."""
+        summary = logging.getLogger("ReducedDoS.summary")
+        summary.info("\n%s", title)
+
+        body = rows
+        if max_rows and len(body) > max_rows: body = body[:max_rows]; clipped = True
+        else: clipped = False
+
+        # Compute simple column widths
+        cols = list(zip(*([header] + body))) if body else [header]
+        widths = [max(len(str(x)) for x in col) for col in cols]
+        fmt = " | ".join("{:%d}" % w for w in widths)
+
+        summary.info(fmt.format(*header))
+        summary.info("-+-".join("-" * w for w in widths))
+        for r in body: summary.info(fmt.format(*r))
+        if clipped: summary.info("… (showing %d of %d rows)", len(body), len(rows))
 
     def run(self) -> None:
         """
@@ -964,8 +1214,8 @@ class ReducedDoSPipeline:
 
         Side effects
         ------------
-        - Writes figures into FIGDIR.
-        - Writes 'UQ_results.csv' and 'Dirac_deltas.csv' into FIGDIR.
+        - Writes figures into cfg.figdir.
+        - Writes 'UQ_results.csv' and 'Dirac_deltas.csv' into cfg.figdir.
         - Prints a compact textual summary (use logging in batch runs).
 
         Failure modes
@@ -974,7 +1224,7 @@ class ReducedDoSPipeline:
         'No data' annotations; the pipeline continues for other cases.
         """
         logger.debug("Config: σ=%.3f eV, N_GRID=%d, ENERGY_RANGE=%s, NORMALISATION=%s, FIGDIR=%s",
-                 BROADENING_EV, N_GRID, ENERGY_RANGE, NORMALISATION, FIGDIR)
+                     BROADENING_EV, N_GRID, ENERGY_RANGE, NORMALISATION, self.cfg.figdir)
         
         parsed_all: dict[str, dict[str, dict[str, ValBandsData]]] = {}
         
@@ -991,16 +1241,16 @@ class ReducedDoSPipeline:
         dirac_store: dict[tuple[str, str], dict[str, tuple[float, float]]] = {}
 
         # Parse & compute per-env metrics
-        for sys_label, root in SYSTEMS.items():
+        for sys_label, root in self.cfg.systems_map.items():
             parsed_all[sys_label] = {}
-            for bias in BIASES:
+            for bias in self.cfg.biases:
                 parsed_all[sys_label][bias] = {}
                 base = root / bias
-                prefix = _get_prefix(sys_label)
+                prefix = self.cfg.resolve_prefix_for(sys_label)
 
                 vac_path  = base / f"{prefix}_vacuum.val_bands"
                 solv_path = base / f"{prefix}.val_bands"
-                
+
                 logger.debug("Processing system=%s bias=%s (prefix=%s)", sys_label, bias, prefix)
                 logger.debug("Paths: vac=%s | solv=%s", vac_path, solv_path)
 
@@ -1008,10 +1258,11 @@ class ReducedDoSPipeline:
                     try: return self.parser.parse(path)
                     except FileNotFoundError: logger.debug("Missing val_bands file: %s", path); return None
 
-                ds_vac = _try(vac_path); ds_solv = _try(solv_path)
+                ds_vac = _try(vac_path)
+                ds_solv = _try(solv_path)
 
                 # EF fallback from logs if missing
-                for env_key, ds in (("vac", ds_vac),("solv", ds_solv)):
+                for env_key, ds in (("vac", ds_vac), ("solv", ds_solv)):
                     if ds is not None and ds.ef_eV is None:
                         ef_fb = self.parser.fallback_ef_from_folder(base)
                         if ef_fb is not None: ds.ef_eV = ef_fb; logger.debug("EF recovered from logs for %s/%s: %.4f eV", sys_label, bias, ef_fb)
@@ -1036,17 +1287,18 @@ class ReducedDoSPipeline:
 
                     # Uncertainties (1σ): jackknife + quadratic; main 2σ uses jackknife
                     ed_se_jack = DiracAnalyser.ed_se_jackknife(ds, grid, BROADENING_EV, window_rel=(-2.0, 2.0))
-                    ed_se_quad = DiracAnalyser.ed_se_quadratic(grid, dos, float(ds.ef_eV), idx_min, halfwidth=0.25) \
-                                 if (ds.ef_eV is not None and idx_min >= 0 and np.isfinite(E_D_rel)) else np.nan
+                    ed_se_quad = (DiracAnalyser.ed_se_quadratic(grid, dos, float(ds.ef_eV), idx_min, halfwidth=0.25) 
+                                  if (ds.ef_eV is not None and idx_min >= 0 and np.isfinite(E_D_rel))
+                                  else np.nan
+                                 )
                     ed_uq_2sigma = 2.0 * ed_se_jack if np.isfinite(ed_se_jack) else np.nan
 
-                    metrics_table.append([sys_label, env_key, bias, 
-                                          self._fmt(E_D_rel), self._fmt(E_D_abs), 
-                                          self._fmt(ed_uq_2sigma), self._fmt(ed_se_jack),
-                                          self._fmt(ed_se_quad), self._fmt(fwhm),])  
+                    metrics_table.append([ sys_label, env_key, bias, self._fmt(E_D_rel), self._fmt(E_D_abs), self._fmt(ed_uq_2sigma), 
+                                          self._fmt(ed_se_jack), self._fmt(ed_se_quad), self._fmt(fwhm),]
+                                        )
 
-                    if np.isfinite(E_D_rel): dirac_store[(sys_label, bias)][env_key] = (float(E_D_rel), float(ed_uq_2sigma) if np.isfinite(ed_uq_2sigma) else np.nan)
-
+                    if np.isfinite(E_D_rel): dirac_store[(sys_label, bias)][env_key] = ( float(E_D_rel), float(ed_uq_2sigma) if np.isfinite(ed_uq_2sigma) else np.nan,)
+        
         # Build ΔE_D = E_D(solv) - E_D(vac) with 2σ uncertainty in quadrature
         for (sys_label, bias), env_map in dirac_store.items():
             if "vac" in env_map and "solv" in env_map:
@@ -1061,18 +1313,26 @@ class ReducedDoSPipeline:
                                     self._fmt(u2_vac), self._fmt(ed_solv), self._fmt(u2_solv),])
 
         # Save plots
-        DoSPlotter.plot_vertical_stack("vac",  VAC_LABEL, parsed_all)
-        DoSPlotter.plot_vertical_stack("solv", SOLV_LABEL, parsed_all)
-        DoSPlotter.plot_2x2_comparison(parsed_all)
+        DoSPlotter.plot_vertical_stack("vac", self.cfg.vac_label, parsed_all, systems=self.cfg.systems_map, biases=self.cfg.biases, 
+                                       name_fn=CLIConfig.system_display_name, ensure_outdir=lambda: self.cfg.ensure_outdir(),
+                                      )
+
+        DoSPlotter.plot_vertical_stack("solv", self.cfg.solv_label, parsed_all, systems=self.cfg.systems_map, biases=self.cfg.biases, 
+                                       name_fn=CLIConfig.system_display_name, ensure_outdir=lambda: self.cfg.ensure_outdir(),
+                                      )
+
+        DoSPlotter.plot_2x2_comparison(parsed_by_sys=parsed_all, biases=self.cfg.biases, name_fn=CLIConfig.system_display_name, 
+                                       ensure_outdir=lambda: self.cfg.ensure_outdir(), vac_label=self.cfg.vac_label, solv_label=self.cfg.solv_label,
+                                      )
 
         # Write CSVs
-        _ensure_outdir()
-        csv_metrics = FIGDIR / "UQ_results.csv"
-        csv_deltas  = FIGDIR / "Dirac_deltas.csv"
+        self.cfg.ensure_outdir()
+        csv_metrics = self.cfg.figdir / "UQ_results.csv"
+        csv_deltas  = self.cfg.figdir / "Dirac_deltas.csv"
         try:
             with open(csv_metrics, "w", newline="") as f: csv.writer(f).writerows(metrics_table)
             with open(csv_deltas, "w", newline="") as f: csv.writer(f).writerows(delta_table)
-        except OSError as e: logger.warning("Failed writing CSVs into %s: %s", FIGDIR, e); raise
+        except OSError as e: logger.warning("Failed writing CSVs into %s: %s", self.cfg.figdir, e); raise
 
         # Parse delta rows back to records for ΔE_D figures
         delta_records: list[dict[str, float]] = []
@@ -1099,22 +1359,32 @@ class ReducedDoSPipeline:
         # Console summaries
         summary = logging.getLogger("ReducedDoS.summary")
         summary.info("Dirac energies relative to EF (eV):")
-        for row in metrics_table[1:]:
-            sys_label, env, bias, ED_rel, _, u2, _, _, _ = row
-            sys_disp = system_display_name(sys_label)
-            summary.info(f" {sys_disp:9s} | {env:4s} | {bias:6s} : {self._pm(ED_rel,u2):15s} eV")
-            
+        midx = {(r[0], r[1], r[2]): (r[3], r[5]) for r in metrics_table[1:]}
+
+        env_order = ("vac", "solv")
+        for sys_label in self.cfg.systems_map.keys():
+            sys_disp = CLIConfig.system_display_name(sys_label)
+            summary.info(f"\n[{sys_disp}]")
+            for env in env_order:
+                for bias in self.cfg.biases:
+                    ED_rel, u2 = midx.get((sys_label, env, bias), ("", ""))
+                    if ED_rel or u2: summary.info(f"  {env:4s} | {bias:6s} : {self._pm(ED_rel, u2):15s} eV")
+
         summary.info("\nΔE_D = E_D(solv) − E_D(vac) (eV):")
         for row in delta_table[1:]:
             sys_label, bias, dED, u2, ev, uv2, es, us2 = row
-            sys_disp = system_display_name(sys_label)
-            vac_s  = self._pm(ev, uv2)
+            sys_disp = CLIConfig.system_display_name(sys_label)
+            vac_s  = self._pm(ev,  uv2)
             solv_s = self._pm(es, us2)
-            
             summary.info(f" {sys_disp:9s} | {bias:6s} : {self._pm(dED,u2):15s} eV  [vac {vac_s:15s}; solv {solv_s}]")
 
-        DoSPlotter.plot_delta_dirac_series(delta_records)
-        DoSPlotter.plot_delta_dirac_heatmap(delta_records)
+        DoSPlotter.plot_delta_dirac_series(delta_records,biases=self.cfg.biases,name_fn=CLIConfig.system_display_name,
+                                           ensure_outdir=lambda: self.cfg.ensure_outdir(),
+                                           )
+        
+        DoSPlotter.plot_delta_dirac_heatmap(delta_records,biases=self.cfg.biases,name_fn=CLIConfig.system_display_name,
+                                            ensure_outdir=lambda: self.cfg.ensure_outdir(),
+                                            )
 
         logger.info("Saved reduced DoS figures and CSVs:")
         logger.info(" - %s", csv_metrics.resolve())
@@ -1175,15 +1445,14 @@ class ReducedDoSPipeline:
 
 # Main routine: Call ReducedDoSPipeline
 def main() -> None:
-    
-    args = parse_args()
-    level = _compute_log_level(args)
-    _configure_logging(level, args.log_file)
+    cfg = CLIConfig.parse_from_argv()
+    cfg.configure_logging()
 
     log = logging.getLogger(__name__)
     log.debug("Logger initialised at level %s", logging.getLevelName(log.getEffectiveLevel()))
-    log.info("Writing outputs to %s", FIGDIR)
+    log.info("Writing outputs to %s", cfg.figdir)
 
-    ReducedDoSPipeline().run()
-    
-if __name__ == "__main__": main()
+    ReducedDoSPipeline(cfg).run()
+
+if __name__ == "__main__":
+    main()

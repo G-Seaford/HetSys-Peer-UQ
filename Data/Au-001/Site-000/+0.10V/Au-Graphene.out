@@ -1,0 +1,140 @@
+==================================================================================
+It's Fri Aug 22 14:02:02 BST 2025.
+*** Starting onetep_launcher (node trent008.blythe.scrtp.warwick.ac.uk, PIDs)...
+    - ONETEP arguments: Au-Graphene.dat
+    - Current directory: /springbrook/home/p/phumhp/GC-eDFT/Graphene-6x6x2/Au-001/Site-000/2.8/+0.10V
+    - Launcher executable directory: /springbrook/share/physicsnh/onetep_main/utils
+    - (-e) ONETEP executable specified through command-line: /springbrook/share/physicsnh/onetep_main/bin/onetep.blythe_gnu
+      ... trying /springbrook/share/physicsnh/onetep_main/bin/onetep.blythe_gnu
+          -> looks OK
+*** Setting up environment...
+    - (-s) Process stack size: unlimited
+    - (-t) OMP_NUM_THREADS: 7
+    - (-o) OMP_STACKSIZE: 64M
+    - (-c) Maximum core file size: 2048000
+    - (-g) No GPUs will be used
+    - (-d) decfort_dump_flag: n
+    - (-m) I_MPI_OFA_TRANSLATION_CACHE: 0
+    - (-m) I_MPI_DAPL_TRANSLATION_CACHE: 0
+    - (-m) I_MPI_DAPL_UD_TRANSLATION_CACHE: 0
+*** Starting ONETEP...
+    - /springbrook/share/physicsnh/onetep_main/bin/onetep.blythe_gnu Au-Graphene.dat
+=================================================================================
+_________________________________________________________________________________
+ +---------------------------------------------------------------+
+ |                                                               |
+ |        ####### #     # ####### ####### ####### ######         |
+ |        #     # ##    # #          #    #       #     #        |
+ |        #     # # #   # #          #    #       #     #        |
+ |        #     # #  #  # #####      #    #####   ######         |
+ |        #     # #   # # #          #    #       #              |
+ |        #     # #    ## #          #    #       #              |
+ |        ####### #     # #######    #    ####### #              |
+ |                                                               |
+ |        Linear-Scaling Ab Initio Total Energy Program          |
+ |                                                               |
+ |          Release for academic collaborators of ODG            |
+ |                                             Version 7.3.96    |
+ | Remote: git@github.com:G-Seaford/onetep_g-seaford.git         |
+ | Local branch: master                                          |
+ | Commit ID: c61dba4d5992c5f6a7fec88f818c1233aa514ee4           |
+ | Date: Fri Jul 18 18:29:54 2025 +0100                          |
+ | Working tree clean                                            |
+ |                                                               |
+ +---------------------------------------------------------------+
+ |                                                               |
+ |  Authors:                                                     |
+ |  Jacek Dziedzic, Peter D. Haynes, Nicholas D. M. Hine,        |
+ |  Arash A. Mostofi, Mike C. Payne and Chris-Kriton Skylaris    |
+ |                                                               |
+ |  Contributors:                                                |
+ |  J. Aarons, L. Andrinopoulos, P. W. Avraam, R. A. Bell,       |
+ |  A. Bhandari, G. A. Bramley, R. J. Charlton, S. J. Clark,     |
+ |  R. J. Clements, G. C. Constantinescu, F. Corsetti,           |
+ |  N. Corsini, O. Dieguez, S. M. M. Dubois, K. K. B. Duff,      |
+ |  J. M. Escartin, M. Escobar Azor, A. Greco,                   |
+ |  H. Helal, Q. O. Hill, L. P. Lee, J.-H. Li,                   |
+ |  T. Li, E. B. Linscott, G. Moynihan, D. D. O`Regan,           |
+ |  O. K. Okan, E. Parkinson, M. J. S. Phipps,                   |
+ |  C. J. Pickard, J. C. A. Prentice, M. I. J. Probert,          |
+ |  L. E. Ratcliff, M. Robinson, A. Ruiz Serrano,                |
+ |  M. dos Santos Dias, J. S. Spencer, E. W. Tait,               |
+ |  G. Teobaldi, D. Turban, V. Vitale, K. A. Wilkinson,          |
+ |  C. Weber, J. C. Womack, Chengcheng Xiao, N. Yeung,           |
+ |  and T. J. Zuehlsdorff.                                       |
+ |                                                               |
+ |                                   Copyright (c) 2004-2025     |
+ |                                                               |
+ |  Please cite:                                                 |
+ |  "The ONETEP linear-scaling density functional theory program"|
+ |   J. Chem. Phys. 152(17) 174111 (2020)                        |
+ |                                                               |
+ |          in all publications arising from your use of ONETEP. |
+ |                                                               |
+ +---------------------------------------------------------------+
+ |                                                               |
+ |   ONETEP is based on developments described in the following  |
+ |   publications:                                               |
+ |                                                               |
+ |  "Nonorthogonal generalized Wannier function pseudopotential  |
+ |   plane-wave method".                                         |
+ |   C.-K. Skylaris, A. A. Mostofi, P. D. Haynes, O. Dieguez,    |
+ |   M. C. Payne.                                                |
+ |   Phys. Rev. B 66 035119 (2002).                              |
+ |                                                               |
+ |  "Preconditioned iterative minimization for linear-scaling    |
+ |   electronic structure calculations".                         |
+ |   A. A. Mostofi, P. D. Haynes, C.-K. Skylaris, M. C. Payne.   |
+ |   J. Chem. Phys. 119(17), pp.8842-8848 (2003).                |
+ |                                                               |
+ |  "Total-energy calculations on a real space grid with         |
+ |   localized functions and a plane-wave basis".                |
+ |   A. A. Mostofi, C.-K. Skylaris, P. D. Haynes, M. C. Payne.   |
+ |   Comput. Phys. Commun. 147, pp.788-802 (2002).               |
+ |                                                               |
+ |  "Accurate kinetic energy evaluation in electronic structure  |
+ |   calculations with localized functions on real space grids"  |
+ |   C.-K. Skylaris, A. A. Mostofi, P. D. Haynes, C. J. Pickard, |
+ |   M. C. Payne.                                                |
+ |   Comput. Phys. Commun. 140, pp.315-322 (2001).               |
+ |                                                               |
+ |  "Accurate ionic forces and geometry optimization in linear-  |
+ |   scaling density-functional theory with local orbitals"      |
+ |   N. D. M. Hine, M. Robinson, P. D. Haynes, C.-K. Skylaris,   |
+ |   M. C. Payne, and A. A. Mostofi.                             |
+ |   Phys. Rev. B 83 195102 (2011).                              |
+ |                                                               |
+ +---------------------------------------------------------------+
+
+Job started: 22-08-2025 14:02 (+0100)
+
+Reading parameters from file "Au-Graphene.dat" ...... done
+
+Initializing kpt-parallel run with 4 kpars.
+|ITER|    RMS GRADIENT   |     TOTAL ENERGY    |   step   |     Epredicted              
+   0     0.00027821014386   -793.25558472767466   0.268319   -795.94298884457248        
+   1     0.00019503159667   -796.99054429202556   0.641202   -801.85733113989374        
+   2     0.00009718285095   -801.88708647017404   0.605409   -802.61102733363521        
+   3     0.00006179510702   -802.68346236860327   0.635011   -803.03253908445697        
+   4     0.00003695730141   -803.03755807455025   0.751684   -803.17041116711653        
+   5     0.00001564864742   -803.17372081613757   0.872578   -803.20449339774927        
+   6     0.00000890537192   -803.20633113864847   1.289766   -803.22394049608522        
+   7     0.00000731930761   -803.22493614982227   1.762786   -803.23973420107427        
+   8     0.00000680812870   -803.23392871233682   0.732761   -803.23832365796568        
+   9     0.00000323372991   -803.23823523826832   2.258504   -803.24122061732214        
+  10     0.00000414912443   -803.23997898416656   0.726438   -803.24057154397519        
+  11     0.00000347498001   -803.24059549484048   0.674663   -803.24140104273806        
+  12     0.00000273863931   -803.24137974018106   0.586134   -803.24194859616182        
+  13     0.00000169043270   -803.24183502283904  <-- CG
+|ITER|    RMS GRADIENT   |     TOTAL ENERGY    |   step   |     Epredicted              
+   0     0.00000625738216   -803.26327504492758   0.236023   -803.26447089163798        
+   1     0.00000527618418   -803.26493826998569   0.246409   -803.26657005396760        
+   2     0.00000452053683   -803.26727102744758   0.238289   -803.26883770725135        
+   3     0.00000360662662   -803.26924989729207   0.225494   -803.27029365703936        
+   4     0.00000337172257   -803.27084973538331   0.607818   -803.27174389093886        
+   5     0.00000273260748   -803.27216065305197   0.762352   -803.27347496968912        
+   6     0.00000253899840   -803.27409206006678   0.741663   -803.27555815782318        
+   7     0.00000216189825   -803.27601024462842   0.880966   -803.27724849089816        
+   8     0.00000176641737   -803.27694793321803  <-- CG
+onetep_launcher: ONETEP seems to have finished correctly (zero exit code).
+                 Brought to you by PID 3745214 on trent008.blythe.scrtp.warwick.ac.uk.
