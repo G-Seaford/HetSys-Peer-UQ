@@ -16,6 +16,7 @@ The full methodology and results are discussed in the final report included in t
 
 ## Repository Structure
 
+```bash
 HetSys-Peer-UQ/
 ├── Data/ # Main data directory
 │   ├── Au-000/
@@ -43,15 +44,18 @@ HetSys-Peer-UQ/
 │               ├── Au-Graphene0.val_bands
 │               ├── Au-Graphene0.xyz
 │               └── Au-Graphene0_vacuum.val_bands
+│
 ├── Figures/ # Selected figures and files from the report for comparison
-│   ├── Dirac_deltas.csv
-│   ├── Stacked_DoS_2x2_Vac_vs_Solv_Au000_vs_Au001B.png
+│   ├── Dirac_Energies.csv
+│   ├── Stacked_DoS_2x2.png
 │   ├── Stacked_DoS_solv.png
 │   ├── Stacked_DoS_vac.png
-│   └── UQ_results.csv
-│ 
+│   └── Uncertainty_Quantification_Values.csv
+│
+├── README.md # This file
+├──
 └── Summer_Project_Report.pdf
-
+```
 ---
 Files present:
 
@@ -63,7 +67,9 @@ Files present:
 `*0_vacuum.val_bands`: File containing vacuum eigenenergies for DoS calculations
 `*0.xyz`: Structure Geometry
 
-`Dirac_deltas.csv`: A file containing the data used to produce Table II (Dirac Energies) in `Summer_Project_Report.pdf`
+`Dirac_Energies.csv`: A file containing the data used to produce Table II (Dirac Energies) in `Summer_Project_Report.pdf`
+`Stacked_DoS_2x2.png`: The DoS plot used in Figure 2 in `Summer_Project_Report.pdf`
+
 
 ---
 
