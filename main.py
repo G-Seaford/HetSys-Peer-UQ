@@ -152,7 +152,7 @@ class CLIConfig:
     - biases: discovered (or default) list of biases, sorted by numeric value
     - _prefix_map_patterns: compiled from JSON when prefix-mode='map'
 
-    Utilities (now methods)
+    Utilities
     -----------------------
     - compute_log_level()           → int
     - configure_logging()           → None
@@ -206,7 +206,7 @@ class CLIConfig:
         p.add_argument("--log-file", type=Path, help="Write logs to this file in addition to stderr")
 
         # Root discovery
-        p.add_argument("--data-root", dest="data_root", type=Path, default=None, help="Root folder containing system folders (preferred)")
+        p.add_argument("--data-root", dest="data_root", type=Path, default=Path("."), help="Root folder containing system folders (preferred)")
 
         # System filters
         p.add_argument("--sys-include", default=r".*", help="Regex to keep system paths (relative to data_root)")
@@ -1327,8 +1327,16 @@ class ReducedDoSPipeline:
                 if np.isfinite(u2_vac) and np.isfinite(u2_solv): u2_delta = float(np.sqrt(u2_vac ** 2 + u2_solv ** 2))
                 else: u2_delta = np.nan
                 
-                delta_table.append([sys_label, bias, self._fmt(delta), self._fmt(u2_delta), self._fmt(ed_vac), 
-                                    self._fmt(u2_vac), self._fmt(ed_solv), self._fmt(u2_solv),])
+                delta_table.append([
+                    sys_label,
+                    bias,
+                    self._fmt(ed_vac),
+                    self._fmt(u2_vac),
+                    self._fmt(ed_solv),
+                    self._fmt(u2_solv),
+                    self._fmt(delta),
+                    self._fmt(u2_delta),
+                ])
 
         # Save plots
         DoSPlotter.plot_vertical_stack("vac", self.cfg.vac_label, parsed_all, systems=self.cfg.systems_map, biases=self.cfg.biases, 
@@ -1355,12 +1363,12 @@ class ReducedDoSPipeline:
         # Parse delta rows back to records for ΔE_D figures
         delta_records: list[dict[str, float]] = []
         for row in delta_table[1:]:
-            sys_label, bias, dED, u2, ev, uv2, es, us2 = (row + [""] * 8)[:8]
-            
+            sys_label, bias, ev, uv2, es, us2, dED, u2 = (row + [""] * 8)[:8]
+
             def _f(x: str) -> float:
                 try: return float(x)
                 except Exception: return float("nan")
-                
+
             delta_records.append({
                 "system": sys_label,
                 "bias": bias,
@@ -1390,7 +1398,7 @@ class ReducedDoSPipeline:
 
         summary.info("\nΔE_D = E_D(solv) − E_D(vac) (eV):")
         for row in delta_table[1:]:
-            sys_label, bias, dED, u2, ev, uv2, es, us2 = row
+            sys_label, bias, ev, uv2, es, us2, dED, u2= row
             sys_disp = CLIConfig.system_display_name(sys_label)
             vac_s  = self._pm(ev,  uv2)
             solv_s = self._pm(es, us2)
