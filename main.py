@@ -1244,12 +1244,12 @@ class ReducedDoSPipeline:
         delta_header = [
             "System",
             "Bias",
-            "ΔE_D (eV)",
-            "ΔE_D 2σ Uncertainty (eV)",
             "Vacuum E_D (eV)",
             "Vacuum 2σ Uncertainty (eV)",
             "Solvent E_D (eV)",
             "Solvent 2σ Uncertainty (eV)",
+            "ΔE_D (eV)",
+            "ΔE_D 2σ Uncertainty (eV)",
         ]
         
         metrics_table: list[list[str]] = [metrics_header]
@@ -1364,12 +1364,12 @@ class ReducedDoSPipeline:
             delta_records.append({
                 "system": sys_label,
                 "bias": bias,
-                "Delta_E_D_eV": _f(dED),
-                "Delta_unc_2sigma_eV": _f(u2),
                 "ED_vac_rel_eV": _f(ev),
                 "ED_vac_unc_2sigma_eV": _f(uv2),
                 "ED_solv_rel_eV": _f(es),
                 "ED_solv_unc_2sigma_eV": _f(us2),
+                "Delta_E_D_eV": _f(dED),
+                "Delta_unc_2sigma_eV": _f(u2),
             })
             
         logger.debug("Parsed %d ΔE_D records for plotting", len(delta_records))

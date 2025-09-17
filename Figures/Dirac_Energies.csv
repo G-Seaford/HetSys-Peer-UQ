@@ -1,4 +1,4 @@
-System,Bias,ΔE_D (eV),ΔE_D 2σ Uncertainty (eV),Vacuum E_D (eV),Vacuum 2σ Uncertainty (eV),Solvent E_D (eV),Solvent 2σ Uncertainty (eV)
+System,Bias,Vacuum E_D (eV),Vacuum 2σ Uncertainty (eV),Solvent E_D (eV),Solvent 2σ Uncertainty (eV),ΔE_D (eV),ΔE_D 2σ Uncertainty (eV)
 Au-000,-0.10V,-0.2938,0.0541,-0.3109,0.0450,-0.6047,0.0300
 Au-000,+0.00V,-0.2974,0.0541,-0.3061,0.0450,-0.6035,0.0300
 Au-000,+0.10V,-0.6033,0.0541,-0.0031,0.0450,-0.6063,0.0300
