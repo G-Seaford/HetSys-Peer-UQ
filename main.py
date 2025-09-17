@@ -1056,7 +1056,7 @@ class DoSPlotter:
 
         fig.subplots_adjust(top=0.90, left=0.05, right=0.98, bottom=0.12, wspace=0.15, hspace=0.15)
         outdir = ensure_outdir()
-        out = outdir / "Stacked_DoS_2x2_Vac_vs_Solv_Au000_vs_Au001B.png"
+        out = outdir / "Stacked_DoS_2x2.png"
         fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved 2x2 comparison plot: %s", out)
@@ -1229,10 +1229,28 @@ class ReducedDoSPipeline:
         parsed_all: dict[str, dict[str, dict[str, ValBandsData]]] = {}
         
         # CSV Headers
-        metrics_header = ["system","env","bias","E_D_rel_eV","E_D_abs_eV","ED_uq_2sigma_eV",
-                          "ED_se_jack_1sigma_eV","ED_se_quad_1sigma_eV","FWHM_near_EF_eV"]
-        delta_header = ["system","bias", "Delta_E_D_eV","Delta_unc_2sigma_eV","ED_vac_rel_eV",
-                        "ED_vac_unc_2sigma_eV","ED_solv_rel_eV","ED_solv_unc_2sigma_eV"]
+        metrics_header = [
+            "System",
+            "Environment",
+            "Bias",
+            "Relative Dirac Energy (eV)",
+            "Absolute Dirac Energy (eV)",
+            "Two-Sigma Uncertainty (eV)",
+            "One-Sigma Jackknife Uncertainty (eV)",
+            "Quadratic Uncertainty (eV)",
+            "FWHM (eV)",
+        ]
+
+        delta_header = [
+            "System",
+            "Bias",
+            "ΔE_D (eV)",
+            "ΔE_D 2σ Uncertainty (eV)",
+            "Vacuum E_D (eV)",
+            "Vacuum 2σ Uncertainty (eV)",
+            "Solvent E_D (eV)",
+            "Solvent 2σ Uncertainty (eV)",
+        ]
         
         metrics_table: list[list[str]] = [metrics_header]
         delta_table: list[list[str]] = [delta_header]
@@ -1327,11 +1345,11 @@ class ReducedDoSPipeline:
 
         # Write CSVs
         self.cfg.ensure_outdir()
-        csv_metrics = self.cfg.figdir / "UQ_results.csv"
-        csv_deltas  = self.cfg.figdir / "Dirac_deltas.csv"
+        csv_metrics = self.cfg.figdir / "Uncertainty_Quantification_Values.csv"
+        csv_deltas  = self.cfg.figdir / "Dirac_Energies.csv"
         try:
-            with open(csv_metrics, "w", newline="") as f: csv.writer(f).writerows(metrics_table)
-            with open(csv_deltas, "w", newline="") as f: csv.writer(f).writerows(delta_table)
+            with open(csv_metrics, "w", newline="", encoding="utf-8") as f: csv.writer(f).writerows(metrics_table)
+            with open(csv_deltas, "w", newline="", encoding="utf-8") as f: csv.writer(f).writerows(delta_table)
         except OSError as e: logger.warning("Failed writing CSVs into %s: %s", self.cfg.figdir, e); raise
 
         # Parse delta rows back to records for ΔE_D figures

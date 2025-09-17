@@ -1,4 +1,4 @@
-system,env,bias,E_D_rel_eV,E_D_abs_eV,ED_uq_2sigma_eV,ED_se_jack_1sigma_eV,ED_se_quad_1sigma_eV,FWHM_near_EF_eV
+System,Environment,Bias,Relative Dirac Energy (eV),Absolute Dirac Energy (eV),Two-Sigma Uncertainty (eV),One-Sigma Jackknife Uncertainty (eV),Quadratic Uncertainty (eV),FWHM (eV)
 Au-000,vac,-0.10V,-0.3109,-2.6963,0.0450,0.0225,0.0005,
 Au-000,solv,-0.10V,-0.6047,-3.1566,0.0300,0.0150,0.0005,
 Au-000,vac,+0.00V,-0.3061,-2.6963,0.0450,0.0225,0.0005,
