@@ -50,7 +50,7 @@ Notes
 """
 
 # DoS evaluation
-BROADENING_EV: float = 0.10  #Gaussian broadening (σ) for DoS kernel in eV; choose to balance smoothness vs bias.
+BROADENING_EV: float = 0.10  # Gaussian broadening (σ) for DoS kernel in eV; choose to balance smoothness vs bias.
 N_GRID: int = 2000
 ENERGY_RANGE: tuple[float, float] = (-10.0, +10.0) # Absolute energy grid for DoS evaluation; Dirac search is relative to EF.
 
@@ -1062,113 +1062,9 @@ class DoSPlotter:
         logger.info("Saved 2x2 comparison plot: %s", out)
         return out
 
-    @staticmethod
-    def plot_delta_dirac_series(
-        delta_records: list[dict[str, float]],
-        biases: list[str],
-        name_fn: Callable[[str], str],
-        ensure_outdir: Callable[[], Path],
-    ) -> Path:
-        logger.debug("Plot ΔE_D series: nrecords=%d", len(delta_records))
-        
-        sys_labels = sorted({r["system"] for r in delta_records}, key=name_fn)
-        sys_labels.sort(key=lambda s: (0 if s.startswith("Au-000") else 1, name_fn(s)))
-        if not sys_labels:
-            logger.warning("No ΔE_D records; skipping series plot")
-            out = ensure_outdir() / "Delta_E_D_vs_Bias_series.png"
-            plt.figure(); plt.savefig(out); plt.close(); return out
-
-        sys_order = sys_labels[:4]
-        fig, axes = plt.subplots(2, 2, figsize=FIGSIZE_DELTA_SERIES, constrained_layout=False, sharey=True)
-        xs, xticklabels = DoSPlotter._bias_positions(biases)
-        table = {(r["system"], r["bias"]): r for r in delta_records}
-
-        for idx, sys_key in enumerate(sys_order):
-            ax = axes[idx // 2, idx % 2]
-            letters = [["(a)", "(b)"], ["(c)", "(d)"]]
-            ax.text(0.02, 0.95, letters[idx // 2][idx % 2], transform=ax.transAxes, ha="left", va="top", fontsize=11, fontweight="bold")
-
-            ys: list[float] = []
-            yerr: list[float] = []
-            for b in biases:
-                rec = table.get((sys_key, b))
-                if rec is None: ys.append(np.nan); yerr.append(0.0)
-                else: ys.append(float(rec["Delta_E_D_eV"])); yerr.append(float(rec["Delta_unc_2sigma_eV"]))
-
-            for x, y, e, b in zip(xs, ys, yerr, biases):
-                ax.errorbar(x, y, yerr=e, fmt="o-", lw=1.4, ms=4, color=BIAS_COLOUR.get(b, COLOURS["black"]), capsize=3)
-
-            ax.axhline(0.0, color="0.4", lw=1.0, ls="--")
-            ax.set_xticks(xs, xticklabels)
-            ax.tick_params(which="both", direction="in", top=True)
-            ax.set_title(name_fn(sys_key))
-            if idx // 2 == 1: ax.set_xlabel("Applied bias (V)")
-            if idx % 2 == 0: ax.set_ylabel(r"$\Delta E_D$ (eV)")
-
-        fig.subplots_adjust(top=0.92, left=0.08, right=0.98, bottom=0.12, wspace=0.20, hspace=0.25)
-        outdir = ensure_outdir()
-        out = outdir / "Delta_E_D_vs_Bias_series.png"
-        fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
-        plt.close(fig)
-
-        logger.info("Saved ΔE_D series plot: %s", out)
-        return out
-
-    @staticmethod
-    def plot_delta_dirac_heatmap(
-        delta_records: list[dict[str, float]],
-        biases: list[str],
-        name_fn: Callable[[str], str],
-        ensure_outdir: Callable[[], Path],
-    ) -> Path:
-        logger.debug("Plot ΔE_D heatmap: nrecords=%d", len(delta_records))
-        sys_labels = sorted({r["system"] for r in delta_records}, key=name_fn)
-        sys_order = sorted(sys_labels, key=lambda s: (0 if s.startswith("Au-000") else 1, name_fn(s)))
-        
-        if not sys_order:
-            logger.warning("No ΔE_D records; skipping heatmap")
-            out = ensure_outdir() / "Delta_E_D_heatmap.png"
-            plt.figure(); plt.savefig(out); plt.close(); return out
-            
-        n_sys, n_bias = len(sys_order), len(biases)
-        Z = np.full((n_sys, n_bias), np.nan, float)
-        U = np.full((n_sys, n_bias), np.nan, float)
-
-        index = {(r["system"], r["bias"]): r for r in delta_records}
-        for i, s in enumerate(sys_order):
-            for j, b in enumerate(biases):
-                rec = index.get((s, b))
-                if rec: Z[i, j] = float(rec["Delta_E_D_eV"]); U[i, j] = float(rec["Delta_unc_2sigma_eV"])
-
-        fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_DELTA_HEAT, constrained_layout=False)
-        vmax = np.nanmax(np.abs(Z))
-        if not np.isfinite(vmax) or vmax == 0: logger.warning("Heatmap ΔE_D has zero/NaN range; using fallback vmax=0.1"); vmax = 0.1
-
-        im = ax.imshow(Z, aspect="auto", cmap="coolwarm", vmin=-vmax, vmax=+vmax)
-        for i in range(n_sys):
-            for j in range(n_bias):
-                if np.isfinite(Z[i, j]):
-                    ax.text(j, i - 0.10, f"{Z[i,j]:+.2f}", ha="center", va="center", fontsize=10, color="k")
-                    ax.text(j, i + 0.25, r"$\pm$" + f"{U[i,j]:.2f}", ha="center", va="center", fontsize=9, color="k")
-
-        ax.set_xticks(np.arange(n_bias), biases)
-        ax.set_yticks(np.arange(n_sys), [name_fn(s) for s in sys_order])
-        ax.tick_params(which="both", direction="in", top=False, right=False)
-        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label(r"$\Delta E_D$ (eV)")
-
-        fig.subplots_adjust(top=0.95, left=0.20, right=0.98, bottom=0.12)
-        outdir = ensure_outdir()
-        out = outdir / "Delta_E_D_heatmap.png"
-        fig.savefig(out, dpi=DPI_SAVE, bbox_inches="tight")
-        plt.close(fig)
-
-        logger.info("Saved ΔE_D heatmap: %s", out)
-        return out
-
 
 # Pipeline
-class ReducedDoSPipeline:
+class DoSPipeline:
     """End-to-end pipeline: parse → build DoS → Dirac/UQ → plots + CSV."""
 
     def __init__(self, cfg: CLIConfig) -> None:
@@ -1404,14 +1300,6 @@ class ReducedDoSPipeline:
             solv_s = self._pm(es, us2)
             summary.info(f" {sys_disp:9s} | {bias:6s} : {self._pm(dED,u2):15s} eV  [vac {vac_s:15s}; solv {solv_s}]")
 
-        DoSPlotter.plot_delta_dirac_series(delta_records,biases=self.cfg.biases,name_fn=CLIConfig.system_display_name,
-                                           ensure_outdir=lambda: self.cfg.ensure_outdir(),
-                                           )
-        
-        DoSPlotter.plot_delta_dirac_heatmap(delta_records,biases=self.cfg.biases,name_fn=CLIConfig.system_display_name,
-                                            ensure_outdir=lambda: self.cfg.ensure_outdir(),
-                                            )
-
         logger.info("Saved reduced DoS figures and CSVs:")
         logger.info(" - %s", csv_metrics.resolve())
         logger.info(" - %s", csv_deltas.resolve())
@@ -1469,7 +1357,7 @@ class ReducedDoSPipeline:
         logger.debug("FWHM: %.4f eV", width)
         return width
 
-# Main routine: Call ReducedDoSPipeline
+# Main routine: Call DoSPipeline
 def main() -> None:
     cfg = CLIConfig.parse_from_argv()
     cfg.configure_logging()
@@ -1478,7 +1366,7 @@ def main() -> None:
     log.debug("Logger initialised at level %s", logging.getLevelName(log.getEffectiveLevel()))
     log.info("Writing outputs to %s", cfg.figdir)
 
-    ReducedDoSPipeline(cfg).run()
+    DoSPipeline(cfg).run()
 
 if __name__ == "__main__":
     main()
