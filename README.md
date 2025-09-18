@@ -246,6 +246,7 @@ Your implementation should reproduce (or explain discrepancies with) Table II to
 Before submission, ensure you have:
 - [ ] Run `uv sync` to install the environment.
 - [ ] Processed the provided `Data/` folder without manual edits.
+- [ ] Converted the eigenenergies in the `.val_bands` files from Hartree to eV!
 - [ ] Generated both CSVs with exact column names and order.
 - [ ] (Optional) Produced figures in the `Results/` folder.
 - [ ] Documented any systematic differences with Table II.
