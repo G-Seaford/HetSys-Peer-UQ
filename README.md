@@ -7,8 +7,7 @@ The aim for this repository is to aid in the reproduction of the Dirac energy an
 
 The goal is to reproduce the Dirac energies, with the uncertainty measure, outlined in Table II. This involves constructing the reduced density of states (DoS) curves (see `Figures/Stacked_DoS_2x2.png`), extracting the Dirac energy (relative to the Fermi level), and providing a rudimentary error quantification using a leave-one-out jackknife over the k-points.
 
-> ⚠️ Notes on the jackknife:
-> The jackknife is used here to quantify sensitivity of E_D to k-point omission. K-point weights are respected since leave-one-out is done at the k-point block level. This gives an internally-consistent 'uncertainty' for the given mesh (4×4×1 MP reduced to symmetry-distinct points). It does not assume strict statistical independence of k-points, but it does assume the estimator varies smoothly with the dataset and that the reduced mesh is a reasonable surrogate for the full Brillouin-zone average. This is **NOT**, in the strict sense, an uncertainty measure nor a true statistical confidence interval, but more of a *sensitivity diagnostic*.
+> ⚠️ The jackknife is used here to quantify sensitivity of E_D to k-point omission. K-point weights are respected since leave-one-out is done at the k-point block level. This gives an internally-consistent 'uncertainty' for the given mesh (4×4×1 MP reduced to symmetry-distinct points). It does not assume strict statistical independence of k-points, but it does assume the estimator varies smoothly with the dataset and that the reduced mesh is a reasonable surrogate for the full Brillouin-zone average. This is **NOT**, in the strict sense, an uncertainty measure nor a true statistical confidence interval, but more of a *sensitivity diagnostic*.
 
 From the *ONETEP* `.val_bands` files you should:
 	1.	Parse valence eigenvalues and k-point weights (with EF fallback from logs when missing).
@@ -169,25 +168,19 @@ Stage 0 — Discovery & configuration
 	•	What happens: Discover systems and biases, resolve prefixes, set output folder, configure logging.
 	•	Inputs: --data-root, --sys-include/--sys-exclude, --sites, --heights, --bias-regex, --prefix-mode.
 	•	Provided code: CLIConfig class (`cli_config.py`).
-
-    ✍️ Self-coded: 
-    A tiny wrapper to call CLIConfig.parse_from_argv() and CLIConfig.configure_logging(), as seen in the main() function in `main.py`.
+    • ✍️ Self-coded: A tiny wrapper to call CLIConfig.parse_from_argv() and CLIConfig.configure_logging(), as seen in the main() function in `main.py`.
 
 Stage 1 — Parse ONETEP val_bands
 	•	What happens: Read k-point blocks, weights, eigenvalues (Ha→eV). Recover EF from logs if missing. **Please ensure you convert the units from Hartree to eV**
 	•	Provided code: ValBandsParser class (data reading, fallback functionality).
 	•	Outputs: ValBandsData(nk, nspin, neig, ef_eV, kpoints[weight, eig_eV]).
-
-	✍️ Self-coded (optional): 
-    A small script that calls the parser and prints nk, neig, and <EF>.
+	• ✍️ Self-coded (optional): A small script that calls the parser and prints nk, neig, and <EF>.
 
 Stage 2 — Build DoS on a fixed grid
 	•	What happens: Flatten all eigenvalues + weights and apply Gaussian broadening (σ = 0.10 eV).
 	•	Provided code: DoSBuilder class (`dos_builder.py`).
 	•	Outputs: energy grid (absolute eV) and DoS arrays.
-	
-    ✍️ Self-coded: 
-    Re-implement just gaussian_dos (1–2 functions), then check your curve matches the provided plots. The `DoSBuilder` class is provided for use in `dos_builder.py`, and can easily be replicated in a custom script.
+    • ✍️ Self-coded: Re-implement just gaussian_dos (1–2 functions), then check your curve matches the provided plots. The `DoSBuilder` class is provided for use in `dos_builder.py`, and can easily be replicated in a custom script.
 
 Stage 3 — Dirac energy extraction + UQ
 	•	What happens:
@@ -195,9 +188,7 @@ Stage 3 — Dirac energy extraction + UQ
 	    - Compute jackknife SE (leave-one-out over k-points; report 2σ = 2×SE).
 	    - Optionally compute quadratic 1σ around the minimum (diagnostic).
 	•	Provided code: DiracAnalyser class (`main.py`).
-
-	✍️ Self-coded:
-	Recompute the Dirac energy using similar logic to that used in the DiracAnalyser class to calculate the Dirac energies with the associated Jackknife uncertainties. This is left as a exercise for you to reproduce; the jackknife equation is covered in the UQ section of `Summer_Project_Report.pdf`. The process for calculating E_D is outlined within the docstring contained in the DiracAnalyser.ed_by_minimum() function.
+	• ✍️ Self-coded: Recompute the Dirac energy using similar logic to that used in the DiracAnalyser class to calculate the Dirac energies with the associated Jackknife uncertainties. This is left as a exercise for you to reproduce; the jackknife equation is covered in the UQ section of `Summer_Project_Report.pdf`. The process for calculating E_D is outlined within the docstring contained in the DiracAnalyser.ed_by_minimum() function.
 
 Stage 4 — Plotting and CSVs
 	•	What happens: Create stacked DoS panels & 2×2 comparison; write metrics CSVs.
@@ -209,9 +200,7 @@ Stage 4 — Plotting and CSVs
         - Results/Stacked_DoS_2x2.png
         - Results/Stacked_DoS_solv.png
         - Results/Stacked_DoS_vac.png
-
-    ✍️ Self-coded:
-	The full pipeline is for you to implement. A good starting point would be the DoSPipeline class in `main.py`. The DoSPlotter class is provided as an optional tool for plotting tha can be used if desired.
+    • ✍️ Self-coded: The full pipeline is for you to implement. A good starting point would be the DoSPipeline class in `main.py`. The DoSPlotter class is provided as an optional tool for plotting tha can be used if desired.
 
 ---
 
