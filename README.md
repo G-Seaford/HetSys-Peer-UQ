@@ -83,8 +83,8 @@ HetSys-Peer-UQ/
 - `*.dat`: ONETEP input file.
 - `*.out`: ONETEP output file containing the grand-canonical free-energy for the vacuum and solvated systems.
 - `*0.onetep`: ONETEP log file for the GC-eDFT run (contains all other properties like forces).
-- `*0.val_bands`: File containing the solvated eigenenergies for DoS calculations.
-- `*0_vacuum.val_bands`: File containing vacuum eigenenergies for DoS calculations.
+- `*0.val_bands`: File containing the solvated eigenenergies for DoS calculations in Hartree.
+- `*0_vacuum.val_bands`: File containing vacuum eigenenergies for DoS calculations in Hartree.
 - `*0.xyz`: Structure Geometry
 
 ##### Figures Subdirectory:
@@ -174,7 +174,7 @@ Stage 0 — Discovery & configuration
     A tiny wrapper to call CLIConfig.parse_from_argv() and CLIConfig.configure_logging(), as seen in the main() function in `main.py`.
 
 Stage 1 — Parse ONETEP val_bands
-	•	What happens: Read k-point blocks, weights, eigenvalues (Ha→eV). Recover EF from logs if missing.
+	•	What happens: Read k-point blocks, weights, eigenvalues (Ha→eV). Recover EF from logs if missing. **Please ensure you convert the units from Hartree to eV**
 	•	Provided code: ValBandsParser class (data reading, fallback functionality).
 	•	Outputs: ValBandsData(nk, nspin, neig, ef_eV, kpoints[weight, eig_eV]).
 
