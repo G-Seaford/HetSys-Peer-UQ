@@ -10,9 +10,10 @@ The goal is to reproduce the Dirac energies, with the uncertainty measure, outli
 > ⚠️ The jackknife is used here to quantify sensitivity of E_D to k-point omission. K-point weights are respected since leave-one-out is done at the k-point block level. This gives an internally-consistent 'uncertainty' for the given mesh (4×4×1 MP reduced to symmetry-distinct points). It does not assume strict statistical independence of k-points, but it does assume the estimator varies smoothly with the dataset and that the reduced mesh is a reasonable surrogate for the full Brillouin-zone average. This is **NOT**, in the strict sense, an uncertainty measure nor a true statistical confidence interval, but more of a *sensitivity diagnostic*.
 
 From the *ONETEP* `.val_bands` files you should:
-1.	Parse valence eigenvalues and k-point weights (with EF fallback from logs when missing).
+1.	Parse valence eigenenergies and k-point weights (with EF fallback from logs when missing). 
+> ⚠️ Warning: These eigenenergies are in Hartree and not in eV, so need to be converted! ⚠️
 2.	Build Gaussian-broadened densities of states (DoS) on a fixed energy grid.
-3.	Extract the Dirac point energy $(E_D)$ as the DoS minimum within ±2 eV of E_F.
+3.	Extract the Dirac point energy $(E_D)$ as the DoS minimum within ±2 eV of E_F. 
 4.	Quantify uncertainty in $(E_D)$ using leave-one-out jackknife over k-points (report 2σ). A local quadratic fit near the minimum is computed as a diagnostic 1σ alternative.
 5.	Generate figures:
 	-	Stacked_DoS_2x2.png (comparison panel)
