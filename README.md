@@ -156,7 +156,7 @@ one can run the python script `main.py`. To do this, one must run the following:
 uv run main.py -v --data-root Data --figdir Results --sys-include '^Au-00[01](?:/|$)' --sites Site-000 Site-002 Site-005 --bias-regex '(?:-0\.10V|\+0\.00V|\+0\.10V)' --prefix-mode auto 
 ```
 
-This calls `uv` to run the main.py script, which will take data from the `Data/` subdirectory, and write outputs into the `Results/` directory. the flags `--sys-include`, `--sites`, `--bias-regex`, and `--prefix-mode` provide guidance to the file search routine, and should be used as provided. A list of possible command line arguments for the CLIConfig class can be found using the `-h` flag (and used by running `uv run main.py -h`). Please do not worry too much about the other options, these are mainly for my use. 
+This calls `uv` to run the main.py script, which will take data from the `Data/` subdirectory, and write outputs into the `Results/` directory. The flags `--sys-include`, `--sites`, `--bias-regex`, and `--prefix-mode` provide guidance to the file search routine, and should be used as provided. A list of possible command line arguments for the CLIConfig class can be found using the `-h` flag (and used by running `uv run main.py -h`). Please do not worry too much about the other options, these are mainly for my use. 
 
 ---
 
